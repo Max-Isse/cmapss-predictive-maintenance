@@ -1,4 +1,4 @@
-.PHONY: image fetch bronze silver gold all test test-local lint shell
+.PHONY: image fetch bronze silver gold replay stream all test test-local lint shell
 
 DC = docker compose run --rm pipeline
 
@@ -16,6 +16,12 @@ silver:
 
 gold:
 	$(DC) uv run cmapss gold
+
+replay:
+	$(DC) uv run cmapss replay --batches $(or $(BATCHES),1)
+
+stream:
+	$(DC) uv run cmapss stream
 
 all:
 	$(DC) uv run cmapss all

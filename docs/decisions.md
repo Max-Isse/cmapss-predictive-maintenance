@@ -153,3 +153,45 @@ added by `add_labels`, separately from the features. Test-engine RUL at every cy
 cycles to the end; `is_last_cycle` marks the official evaluation point.
 **Why:** the decision the model supports is "schedule a shop visit now", which needs at least the lead time to act.
 Base rates: 12.5–15% of training cycles, about 2–3% of test cycles, 20–25% of test engines at their last cycle.
+
+## D-018 SYNTHETIC REPLAY: real test-engine rows, simulated arrival
+**Choice:** `cmapss replay --batches N` re-delivers the NASA test engines into `landing/replay/` as
+`replay_<dataset>_SYNTHETIC_b<batch>.txt`. Each line is the original test-file line, byte for byte; batch b
+carries cycles (b−1)·25+1 … b·25 of every test engine (`replay.cycles_per_batch`), all engines start together,
+and an engine stops after its last test cycle. Five rows per batch (`replay.late_rows`, seeded) are held back and
+delivered with the next batch, as a deliberate late-arrival disturbance. Progress lives in
+`landing/replay/_state.json`; bronze stores the rows under split `replay`, so the SYNTHETIC label travels with
+every row in `_source_file`.
+**Why:** C-MAPSS has no live feed. Replaying the official test engines exercises the incremental pipeline,
+serving and monitoring on real sensor values, and their ground truth (NASA RUL) is known for evaluation.
+**Labels:** a replayed engine's RUL comes from its test engine's end of life (last test cycle + NASA RUL), known
+before the replay ends. A live fleet would learn this only after failure; labels are used for evaluation and
+monitoring only, never as features.
+**Not simulated:** staggered engine start times, sensor faults, schema changes. Duplicates and out-of-range
+values are covered by the silver tests (D-010, D-007).
+
+## D-019 Incremental processing: a Structured Streaming query over bronze, engine-scoped recompute
+**Choice:** `cmapss stream` (and each replay batch) runs a Structured Streaming query on the bronze Delta table
+with `trigger(availableNow=True)` and a checkpoint under `lakehouse/_checkpoints/`. Each micro-batch lists the
+engines it touches and recomputes silver, quarantine and gold for those engines from their **full bronze
+history**, with the same functions as the full rebuild (`silver_frames`, `build_features`, `add_labels`),
+then swaps them in with Delta `replaceWhere`, one atomic commit per table. The pandera contract gates the
+recomputed silver rows before anything is written. The first run starts right after the bronze version that the
+last full `cmapss silver` read (pinned with `versionAsOf` and recorded in `lakehouse/_state/`).
+**Why:** every rule and feature is local to one engine, so recomputing touched engines equals a full rebuild for
+them; this is checked after every replay (`verify_incremental`: silver, quarantine and gold compared row for row
+with a full recomputation). A late row re-opens its engine, so the `sequence_gap` quarantine of the rows after it
+is replaced by valid rows one batch later (D-011 keeps the prefix; this restores the rest). Appending only new
+rows to gold would be cheaper but would freeze such errors in place.
+**Cost, as measured (full replay, 20 batches):** the data work per batch is small (one engine's history is at
+most a few hundred rows), but the wall time is not proportional to it. Each batch took 84–163 s on a 4-core local
+Spark: bronze ingestion of the 2–4 batch files 33–77 s, the stream step 45–93 s, and both grew over the replay while
+the engines recomputed fell from 707 to 2. The time is per-batch overhead (a new streaming query, Delta log and
+file listing, contract checks, rewriting the gold files that hold the touched engines) that grows with table
+history and small files. Not tuned in this phase; candidates: periodic `OPTIMIZE` compaction or auto-compaction,
+deletion vectors so `replaceWhere` marks rows instead of rewriting files, and fewer, larger triggers.
+**Alternatives:** stream silver → gold with Delta change data feed (two queries; more state to keep consistent);
+`foreachBatch` MERGE of new rows only (cannot repair late arrivals). On Databricks, the same code runs as a job with
+an Auto Loader source in place of the file-level bronze loader (phase 8 notes).
+**Limits:** new RUL deliveries are not streamed; `cmapss silver` rebuilds the RUL table. The feature spec is
+read, never refitted, by the stream: refitting is a deliberate `cmapss gold` run.

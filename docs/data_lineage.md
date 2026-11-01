@@ -61,3 +61,19 @@ Every count equals the row count of the NASA source file in `data/raw_manifest.j
   columns, every test row labelled.
 - **Point-in-time check on the full data:** 1,416 engines cut at a random cycle, 134,007 rows recomputed from the
   cut history; all identical to gold (maximum difference 0, no null-pattern differences).
+
+## SYNTHETIC REPLAY and incremental processing (`cmapss replay`; report: `reports/replay.md`)
+
+| Step | Code | Rule | Decision |
+|---|---|---|---|
+| Replay | `ingest/replay.py` | Real test-file lines, 25 cycles per engine per batch, 5 late rows per batch; files `replay_<dataset>_SYNTHETIC_b<batch>.txt` | D-018 |
+| Bronze | `ingest/bronze.py` | Same loader: new files only, insert-only MERGE, split `replay` | D-004 |
+| Stream | `pipeline/incremental.py` | Structured Streaming on bronze (`availableNow`, checkpoint); touched engines recomputed from full bronze history; contract gate; `replaceWhere` into silver, quarantine, gold | D-019 |
+
+- **Result (2026-11-01, full replay):** 20 batches delivered all 104,897 test rows of 707 engines (FD001–FD004).
+  Bronze inserted exactly the delivered rows. Each batch's late rows left 24–88 rows of their engines in
+  quarantine as `sequence_gap`; the next batch released them, and after the last batch the quarantine is empty.
+- **Incremental = full rebuild:** silver (370,153 rows), quarantine (0) and gold (370,153 rows) maintained batch by
+  batch match a full recomputation from bronze row for row (0 mismatches). Gold carries one feature-spec version.
+- **Timing:** 84–163 s per batch on local Spark; split and causes in D-019 (per-batch overhead that grows with the
+  tables, not with the rows delivered).

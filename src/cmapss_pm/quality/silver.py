@@ -17,10 +17,13 @@ The pandera contract (quality/contract.py) then validates the silver table as a 
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+from delta.tables import DeltaTable
 from pyspark.sql import Column, DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
@@ -169,13 +172,15 @@ class SilverResult:
     extras: dict[str, Any] = field(default_factory=dict)
 
 
-def build_silver(spark: SparkSession, cfg: Config, run_id: str | None = None) -> SilverResult:
-    started = datetime.now(UTC)
-    run_id = run_id or f"silver-{started:%Y%m%dT%H%M%S}"
-    values = _value_columns(cfg)
-    bronze = spark.read.format("delta").load(bronze_path(cfg, "cycles"))
-    bronze_cols = bronze.columns
+def silver_frames(bronze: DataFrame, cfg: Config) -> tuple[DataFrame, DataFrame, list[DataFrame]]:
+    """Rules 1-6 on bronze cycle rows -> (silver rows, quarantine rows, frames to unpersist).
 
+    Every rule is local to one engine (rules 1-4 to one row), so running this on all bronze rows of a set of
+    engines gives exactly the rows a full rebuild gives for those engines. The full build and the incremental
+    update (pipeline/incremental.py) both call it (D-019).
+    """
+    values = _value_columns(cfg)
+    bronze_cols = bronze.columns
     checked = row_rules(bronze, cfg).cache()
     passed = checked.where(F.col("rule").isNull()).drop("rule", "reason")
     failed_rows = checked.where(F.col("rule").isNotNull())
@@ -202,10 +207,6 @@ def build_silver(spark: SparkSession, cfg: Config, run_id: str | None = None) ->
         "_record_hash",
         "_source_file",
         F.col("_ingest_ts").alias("_bronze_ingest_ts"),
-        F.lit(run_id).alias("_silver_run_id"),
-    )
-    silver.write.format("delta").mode("overwrite").option("overwriteSchema", "true").partitionBy("dataset").save(
-        silver_path(cfg, "cycles")
     )
 
     def as_quarantine(df: DataFrame) -> DataFrame:
@@ -217,8 +218,28 @@ def build_silver(spark: SparkSession, cfg: Config, run_id: str | None = None) ->
         .unionByName(as_quarantine(superseded))
         .unionByName(as_quarantine(gaps))
         .withColumn("source_table", F.lit("cycles"))
-        .withColumn("_silver_run_id", F.lit(run_id))
-        .withColumn("quarantined_ts", F.current_timestamp())
+    )
+    return silver, quarantine, [checked, dedup, sequenced]
+
+
+def state_path(cfg: Config, name: str) -> Path:
+    return cfg.path("lakehouse_dir") / "_state" / f"{name}.json"
+
+
+def build_silver(spark: SparkSession, cfg: Config, run_id: str | None = None) -> SilverResult:
+    started = datetime.now(UTC)
+    run_id = run_id or f"silver-{started:%Y%m%dT%H%M%S}"
+    # pin the bronze version read, so the incremental stream can start right after it (D-019)
+    bronze_version = int(DeltaTable.forPath(spark, bronze_path(cfg, "cycles")).history(1).first()["version"])  # type: ignore[index]
+    bronze = spark.read.format("delta").option("versionAsOf", bronze_version).load(bronze_path(cfg, "cycles"))
+
+    good, quarantine, cached = silver_frames(bronze, cfg)
+    silver = good.withColumn("_silver_run_id", F.lit(run_id))
+    silver.write.format("delta").mode("overwrite").option("overwriteSchema", "true").partitionBy("dataset").save(
+        silver_path(cfg, "cycles")
+    )
+    quarantine = quarantine.withColumn("_silver_run_id", F.lit(run_id)).withColumn(
+        "quarantined_ts", F.current_timestamp()
     )
 
     rul_silver, rul_quarantine, rul_checks = build_silver_rul(spark, cfg, run_id, silver)
@@ -243,10 +264,12 @@ def build_silver(spark: SparkSession, cfg: Config, run_id: str | None = None) ->
         .orderBy("dataset", "split")
         .collect()
     ]
-    checked.unpersist()
-    dedup.unpersist()
-    sequenced.unpersist()
-    return SilverResult(run_id, started, counts, by_rule, rul_checks, engines)
+    for df in cached:
+        df.unpersist()
+    st = state_path(cfg, "silver_full_build")
+    st.parent.mkdir(parents=True, exist_ok=True)
+    st.write_text(json.dumps({"run_id": run_id, "bronze_version": bronze_version}), encoding="utf-8")
+    return SilverResult(run_id, started, counts, by_rule, rul_checks, engines, {"bronze_version": bronze_version})
 
 
 def build_silver_rul(

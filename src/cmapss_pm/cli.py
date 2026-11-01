@@ -90,14 +90,36 @@ def cmd_gold(cfg: Config) -> None:
         raise SystemExit(f"point-in-time check failed: {pit}")
 
 
+def cmd_stream(cfg: Config) -> None:
+    from cmapss_pm.pipeline.incremental import run_stream
+    from cmapss_pm.spark import get_spark
+
+    for s in run_stream(get_spark(cfg), cfg):
+        log.info("micro-batch %s", json.dumps(s))
+
+
+def cmd_replay(cfg: Config, batches: int) -> None:
+    from cmapss_pm.pipeline.replay_run import run_replay, write_replay_report
+    from cmapss_pm.spark import get_spark
+
+    spark = get_spark(cfg)
+    for row in run_replay(spark, cfg, batches):
+        log.info("replay batch %s", json.dumps(row))
+    path, check = write_replay_report(spark, cfg)
+    log.info("replay report %s; incremental = full recomputation: %s", path, check["passed"])
+    if not check["passed"]:
+        raise SystemExit(f"incremental tables differ from a full recomputation: {check}")
+
+
 STEPS = ["fetch", "bronze", "silver", "gold"]
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="cmapss", description=__doc__)
-    parser.add_argument("step", choices=[*STEPS, "all"])
+    parser.add_argument("step", choices=[*STEPS, "all", "stream", "replay"])
     parser.add_argument("--config", default=None)
     parser.add_argument("--force", action="store_true", help="fetch: re-download; bronze: re-read already-logged files")
+    parser.add_argument("--batches", type=int, default=1, help="replay: number of SYNTHETIC REPLAY batches to deliver")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     cfg = load_config(args.config)
@@ -106,6 +128,8 @@ def main(argv: list[str] | None = None) -> None:
         "bronze": lambda: cmd_bronze(cfg, args.force),
         "silver": lambda: cmd_silver(cfg),
         "gold": lambda: cmd_gold(cfg),
+        "stream": lambda: cmd_stream(cfg),
+        "replay": lambda: cmd_replay(cfg, args.batches),
     }
     for name in STEPS if args.step == "all" else [args.step]:
         steps[name]()

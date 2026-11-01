@@ -41,13 +41,16 @@ an estimate on simulated data and does not transfer to a real fleet without vali
 ## Layout
 
 - `raw/download/` — archive as downloaded (git-ignored); `raw/cmapss/` — extracted text files.
-- `landing/text/`, `landing/parquet/` — files waiting for ingestion (D-005); `landing/replay/` (phase 4).
-- `lakehouse/{bronze,silver,gold}/` — Delta tables (git-ignored, rebuilt by the pipeline).
+- `landing/text/`, `landing/parquet/` — files waiting for ingestion (D-005); `landing/replay/` — SYNTHETIC REPLAY batches and `_state.json` (phase 4).
+- `lakehouse/{bronze,silver,gold}/` — Delta tables (git-ignored, rebuilt by the pipeline); `lakehouse/_checkpoints/`
+  and `lakehouse/_state/` — streaming checkpoint and the bronze version of the last full silver build.
 
 ## Synthetic data
 
-- **Phase 4 (planned):** a **SYNTHETIC REPLAY** that feeds real test-set engines into the landing zone cycle by
-  cycle, as if they were arriving from the fleet. The values are real; only the arrival timing is simulated. It
-  will be labelled as such in the lineage.
+- **SYNTHETIC REPLAY (phase 4, D-018):** `cmapss replay` re-delivers the real NASA test engines into
+  `landing/replay/` in batches of 25 cycles per engine, as if the fleet were flying now. Every value is the
+  original test-file line; arrival time and order are simulated, including 5 deliberately late rows per batch.
+  Files are named `replay_<dataset>_SYNTHETIC_b<batch>.txt` and land in bronze, silver and gold under split
+  `replay`. Report: `reports/replay.md`.
 - **Tests:** `tests/fixtures/` holds hand-built files in the NASA format (2 engines, random sensor values) used
   only to test code.

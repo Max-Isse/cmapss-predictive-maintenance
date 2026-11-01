@@ -157,10 +157,14 @@ def test_serving_one_engine_gives_the_training_rows(fitted: tuple[Any, Any, Any]
 
 
 def test_labels(fitted: tuple[Any, Any, Any]) -> None:
-    from cmapss_pm.features.build import add_labels, build_features
+    from cmapss_pm.features.build import add_labels, build_features, end_of_life
 
     cycles, rul, spec = fitted
-    g = add_labels(build_features(cycles, spec), rul, spec).toPandas().set_index(["split", "unit", "cycle"])
+    g = (
+        add_labels(build_features(cycles, spec), end_of_life(cycles, rul), spec)
+        .toPandas()
+        .set_index(["split", "unit", "cycle"])
+    )
     tr = g.loc[("train", 2)]
     assert (tr.rul == TRAIN_LIVES[2] - tr.index).all()
     assert tr.loc[TRAIN_LIVES[2], "rul"] == 0 and bool(tr.loc[TRAIN_LIVES[2], "is_last_cycle"])

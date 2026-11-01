@@ -19,7 +19,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from cmapss_pm.config import Config
-from cmapss_pm.features.build import KEY, add_labels, build_features, feature_columns
+from cmapss_pm.features.build import KEY, add_labels, build_features, end_of_life, feature_columns
 from cmapss_pm.features.spec import FeatureSpec, fit_spec, save_spec, spec_path
 from cmapss_pm.quality.silver import silver_path
 
@@ -81,7 +81,7 @@ def build_gold(
     tables.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(path, tables / "feature_spec.json")
 
-    gold = add_labels(build_features(cycles, spec), rul, spec).select(
+    gold = add_labels(build_features(cycles, spec), end_of_life(cycles, rul), spec).select(
         "*", F.lit(spec.version).alias("_spec_version"), F.lit(run_id).alias("_gold_run_id")
     )
     gold.write.format("delta").mode("overwrite").option("overwriteSchema", "true").partitionBy("dataset").save(

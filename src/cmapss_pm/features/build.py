@@ -92,21 +92,37 @@ def build_features(df: DataFrame, spec: FeatureSpec) -> DataFrame:
     return staged.select(*KEY, "op_condition", "op_condition_dist", *feature_columns(spec)[1:])
 
 
-def add_labels(features: DataFrame, rul: DataFrame, spec: FeatureSpec) -> DataFrame:
+def end_of_life(cycles: DataFrame, rul: DataFrame) -> DataFrame:
+    """Failure cycle per engine: (dataset, split, unit, eol_cycle), from silver cycles and silver RUL.
+
+    Training engines run to failure: eol = last cycle. Test engines stop early: eol = last test cycle + NASA RUL.
+    A replayed engine is a test engine re-delivered, so it takes its test engine's eol even while only part of it
+    has arrived (ground truth that a live fleet would learn later; used for evaluation, never for features).
+    """
+    last = cycles.where(F.col("split").isin("train", "test")).groupBy(*ENGINE).agg(F.max("cycle").alias("_last"))
+    end = rul.select("dataset", "unit", F.col("rul").alias("_rul_at_end"))
+    eol = last.join(end, ["dataset", "unit"], "left").select(
+        *ENGINE,
+        (F.col("_last") + F.when(F.col("split") == "train", F.lit(0)).otherwise(F.col("_rul_at_end"))).alias(
+            "eol_cycle"
+        ),
+    )
+    return eol.unionByName(eol.where(F.col("split") == "test").withColumn("split", F.lit("replay")))
+
+
+def add_labels(features: DataFrame, eol: DataFrame, spec: FeatureSpec) -> DataFrame:
     """RUL, capped RUL and failure within N cycles at every row (labels look ahead; features never do).
 
-    Training engines run to failure, so RUL = last cycle - cycle. Test (and replayed test) engines stop early; their
-    RUL at the last cycle comes from silver.rul, so RUL = that value + last cycle - cycle.
+    `eol` comes from `end_of_life`. RUL = eol_cycle - cycle. `is_last_cycle` marks each engine's last row present
+    in `features`: the official evaluation point for test engines, the latest arrival for replayed ones.
     """
     last = F.max("cycle").over(Window.partitionBy(*ENGINE))
-    end = rul.select("dataset", "unit", F.col("rul").alias("_rul_at_end"))
-    joined = features.join(end, ["dataset", "unit"], "left")
-    rul_at_end = F.when(F.col("split") == "train", F.lit(0)).otherwise(F.col("_rul_at_end"))
-    labelled = joined.withColumn("_last", last).withColumn("rul", (rul_at_end + F.col("_last") - F.col("cycle")))
+    labelled = features.join(eol, ENGINE, "left").withColumn("_last", last)
+    rul = F.col("eol_cycle") - F.col("cycle")
     return labelled.select(
         *features.columns,
-        F.col("rul").cast("int").alias("rul"),
-        F.least(F.col("rul"), F.lit(spec.rul_cap)).cast("int").alias("rul_capped"),
-        (F.col("rul") <= spec.horizon).cast("int").alias("fail_within_n"),
+        rul.cast("int").alias("rul"),
+        F.least(rul, F.lit(spec.rul_cap)).cast("int").alias("rul_capped"),
+        (rul <= spec.horizon).cast("int").alias("fail_within_n"),
         (F.col("cycle") == F.col("_last")).alias("is_last_cycle"),
     )

@@ -193,12 +193,13 @@ def write_log(spark: SparkSession, cfg: Config, run_id: str, results: list[Inges
     spark.createDataFrame(rows, schema).write.format("delta").mode("append").save(bronze_path(cfg, "ingest_log"))
 
 
-def landing_files(cfg: Config, formats: tuple[str, ...] = ("text", "parquet")) -> list[Path]:
+def landing_files(cfg: Config, folders: tuple[str, ...] = ("text", "parquet", "replay")) -> list[Path]:
+    """Landing files by folder: text/ and replay/ hold .txt deliveries, parquet/ holds .parquet."""
     landing = cfg.path("landing_dir")
     files: list[Path] = []
-    for fmt in formats:
-        ext = "txt" if fmt == "text" else "parquet"
-        files += sorted((landing / fmt).glob(f"*.{ext}"))
+    for folder in folders:
+        ext = "parquet" if folder == "parquet" else "txt"
+        files += sorted((landing / folder).glob(f"*.{ext}"))
     return files
 
 

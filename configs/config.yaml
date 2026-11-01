@@ -78,6 +78,13 @@ features:
   health_index_sensors: [sensor_02, sensor_03, sensor_04, sensor_11, sensor_17]
   baseline_cycles: 30
 
+replay:
+  # SYNTHETIC REPLAY (phase 4, D-018): the real NASA test-engine rows, re-delivered batch by batch into
+  # landing/replay/ as if the fleet were flying now. Values are real; arrival time and order are simulated.
+  datasets: [FD001, FD002, FD003, FD004]
+  cycles_per_batch: 25              # cycles each engine flies between two deliveries
+  late_rows: 5                      # SYNTHETIC disturbance per batch: rows held back to the next batch; 0 = none
+
 spark:
   master: local[4]
   shuffle_partitions: 8
