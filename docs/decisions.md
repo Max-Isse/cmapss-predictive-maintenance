@@ -102,3 +102,54 @@ malformed lines on their raw text.
 **Why:** Spark 4 runs in ANSI mode, so a plain cast of `abc` to double raises and aborted the whole bronze load
 (found by the silver tests). Bronze must accept anything that arrives so silver can quarantine it. Numeric rows
 hash exactly as before: a forced re-run of all 24 files inserted 0 rows.
+
+## D-013 One feature spec, fitted on training engines only, shared by training and serving
+**Choice:** every constant the features need (operating-condition centroids, kept sensors, per-condition mean and
+standard deviation, windows, RUL cap, horizon) is fitted on the training engines of all four datasets pooled and
+saved as `artifacts/feature_spec.json` (copy: `reports/tables/feature_spec.json`), with a content-hash version
+stamped on every gold row. `features/build.py::build_features` is the only feature code: the gold build, the
+replay and the API call it with that spec.
+**Why:** test and replayed engines never influence a constant they are scored with, and serving cannot drift
+from training because there is no second implementation. Pooling is possible because all four datasets simulate
+the same engine model and share the sea-level condition; per-condition statistics already absorb the conditions.
+**Cost:** serving needs a local Spark session (a JVM in the API container); acceptable for a batch-scoring
+portfolio service, revisited in phase 7 if latency matters.
+**Near-constant rule:** a sensor is dropped when it has at most 2 distinct values within every operating condition
+(`features.constant_max_distinct`). That drops sensors 01, 05, 18, 19 (one value per condition) and 16 (two
+values, a quantisation step); sensor 10 (3–6 values, weak signal) and 06 are kept and left to the models. Counting
+within conditions matters: across the fleet every sensor varies because the conditions shift them.
+
+## D-014 Operating conditions by k-means (k = 6) on standardised settings, best of 10 seeds
+**Choice:** Spark ML k-means on the three settings standardised by their training mean and standard deviation;
+the lowest-cost of 10 seeded runs; centroids stored in original units, sorted, so condition ids are stable.
+Each row gets the nearest centroid and its distance (`op_condition_dist`, kept for monitoring).
+**Why:** the readme states six conditions; the data confirm them: every point of every split lies within 0.005
+standardised units of a centroid. Rounding the settings instead was fragile (signed zeros split the sea-level
+condition into three keys). A single k-means run merged two conditions in the test data, hence the restarts.
+**Caveat:** standardising amplifies a setting that is constant up to jitter; on pooled training data all three
+settings vary, and k = 1 (a single-condition fit) skips k-means.
+
+## D-015 Per-condition normalisation, then rolling windows on the normalised values
+**Choice:** z = (value − condition mean) / condition standard deviation for each kept sensor; rolling mean and
+standard deviation (DataFrame API) and least-squares slope on cycle (Spark SQL `regr_slope`) over 5, 15 and 30
+cycles, framed `RANGE BETWEEN w−1 PRECEDING AND CURRENT ROW` over the cycle number within each engine.
+**Why:** in FD002 and FD004 the raw correlation of every sensor with RUL is about 0 (the condition dominates);
+after normalisation it is up to −0.69, as in FD001 (`reports/features.md` §3). Rolling over raw values would mix
+conditions. A RANGE frame over cycle means "the last w cycles", which stays correct even if a gap ever passed
+silver. Windows shorter than w at the start of life use the cycles available; std and slope are null on the first
+cycle (left for the models, which handle missing values).
+
+## D-016 RUL target capped at 125 cycles (piecewise linear)
+**Choice:** `rul_capped = min(rul, 125)` (`features.rul_cap`); the uncapped `rul` is kept for evaluation.
+**Why:** a health index built from five sensors, relative to each engine's own early life, is flat within noise
+above RUL ≈ 170 and rises over the last 100–150 cycles. The least-squares hinge optimum is 95 (biased low because
+wear accelerates); 125 sits between the two, costs 7.6% more hinge SSE than the optimum, is below the 5% quantile
+of training engine life (149), and is the usual C-MAPSS choice, keeping RMSE comparable with published work.
+**Sensitivity:** to be checked in phase 5 (models trained with caps 100, 125, 150).
+
+## D-017 Failure-within-N label with N = the maintenance lead time (30 cycles)
+**Choice:** `fail_within_n = 1` when `rul <= 30`, N read from `business.maintenance_lead_time_cycles`; labels are
+added by `add_labels`, separately from the features. Test-engine RUL at every cycle = NASA RUL at the last cycle +
+cycles to the end; `is_last_cycle` marks the official evaluation point.
+**Why:** the decision the model supports is "schedule a shop visit now", which needs at least the lead time to act.
+Base rates: 12.5–15% of training cycles, about 2–3% of test cycles, 20–25% of test engines at their last cycle.

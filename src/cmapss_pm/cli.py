@@ -69,7 +69,28 @@ def cmd_silver(cfg: Config) -> None:
         raise SystemExit(f"silver contract failed ({len(errors)} checks): see {path}")
 
 
-STEPS = ["fetch", "bronze", "silver"]
+def cmd_gold(cfg: Config) -> None:
+    from cmapss_pm.features.gold import build_gold
+    from cmapss_pm.features.report import write_feature_report
+    from cmapss_pm.spark import get_spark
+
+    spark = get_spark(cfg)
+    res = build_gold(spark, cfg)
+    path = write_feature_report(spark, cfg, res)
+    log.info(
+        "gold %s: %s; spec %s; point-in-time %s; report %s",
+        res.run_id,
+        res.counts,
+        res.spec.version,
+        res.point_in_time,
+        path,
+    )
+    pit = res.point_in_time
+    if pit["max_abs_diff"] > 1e-9 or pit["null_pattern_mismatches"] or pit["rows_compared"] != pit["rows_expected"]:
+        raise SystemExit(f"point-in-time check failed: {pit}")
+
+
+STEPS = ["fetch", "bronze", "silver", "gold"]
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -84,6 +105,7 @@ def main(argv: list[str] | None = None) -> None:
         "fetch": lambda: cmd_fetch(cfg, args.force),
         "bronze": lambda: cmd_bronze(cfg, args.force),
         "silver": lambda: cmd_silver(cfg),
+        "gold": lambda: cmd_gold(cfg),
     }
     for name in STEPS if args.step == "all" else [args.step]:
         steps[name]()

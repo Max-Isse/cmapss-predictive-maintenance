@@ -47,3 +47,17 @@ Every count equals the row count of the NASA source file in `data/raw_manifest.j
   inserted; all 265,963 Parquet rows matched existing records and were not inserted.
 - *Re-run:* all 24 files were skipped by checksum.
 - *`--force` re-run:* all 24 files went through the MERGE again, and 0 rows were inserted.
+
+## Gold (`cmapss gold`; evidence: `reports/features.md`)
+
+| Step | Code | Rule | Decision |
+|---|---|---|---|
+| Feature spec | `features/spec.py` | Fitted on silver training engines only; saved with a content-hash version | D-013, D-014 |
+| Features | `features/build.py` | Condition, per-condition z-scores, rolling mean/std/slope over 5/15/30 cycles | D-015 |
+| Labels | `features/build.py::add_labels` | RUL, RUL capped at 125, failure within 30 cycles, last-cycle flag | D-016, D-017 |
+| Table | `features/gold.py` | `gold/features`: rebuilt in full, partitioned by dataset, `_spec_version` and `_gold_run_id` on every row | D-008 |
+
+- **Result (2026-11-01):** 265,256 silver cycles in, 265,256 gold rows out (one per engine × cycle), 161 feature
+  columns, every test row labelled.
+- **Point-in-time check on the full data:** 1,416 engines cut at a random cycle, 134,007 rows recomputed from the
+  cut history; all identical to gold (maximum difference 0, no null-pattern differences).

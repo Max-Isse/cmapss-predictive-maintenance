@@ -11,6 +11,7 @@ paths:
   reports_dir: reports
   tables_dir: reports/tables
   figures_dir: reports/figures
+  artifacts_dir: artifacts           # fitted feature spec, models (git-ignored; the spec is copied to reports/tables)
 
 source:
   # Official NASA Prognostics Center of Excellence repository, data set 6 (C-MAPSS).
@@ -63,6 +64,19 @@ business:
   planned_maintenance_cost: 200         # ASSUMPTION: scheduled shop visit
   lost_life_cost_per_cycle: 1.0         # ASSUMPTION: value of each cycle of useful life given up by pulling early
   maintenance_lead_time_cycles: 30      # ASSUMPTION: cycles needed to schedule a shop visit = N in "fail within N"
+
+features:
+  # Fitted on TRAINING engines only (FD001-FD004 pooled) and applied unchanged to test, replay and serving (D-013).
+  n_conditions: 6                   # operating conditions = k for k-means on the 3 settings (readme; confirmed, D-014)
+  kmeans_restarts: 10               # k-means runs from different seeds; the lowest within-cluster cost wins
+  constant_max_distinct: 2          # drop a sensor with <= this many distinct values in EVERY condition (D-013)
+  windows: [5, 15, 30]              # rolling windows in cycles: mean, std and slope of each normalised sensor
+  rul_cap: 125                      # piecewise-linear RUL target cap (D-016; evidence in reports/features.md)
+  # failure-within-N horizon N = business.maintenance_lead_time_cycles
+  # RUL-cap diagnostic only: sensors whose normalised value rises with wear in all four datasets, and the
+  # early-life cycles used as each engine's own baseline
+  health_index_sensors: [sensor_02, sensor_03, sensor_04, sensor_11, sensor_17]
+  baseline_cycles: 30
 
 spark:
   master: local[4]
