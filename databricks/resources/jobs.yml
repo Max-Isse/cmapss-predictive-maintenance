@@ -1,0 +1,83 @@
+# Two jobs: the scheduled pipeline (bronze -> incremental silver/gold) and the model lifecycle
+# (train -> policy -> score -> monitor with retraining). Every task runs the same `cmapss` entry point as locally.
+resources:
+  jobs:
+    cmapss_pipeline:
+      name: cmapss-pipeline-${bundle.target}
+      schedule:
+        quartz_cron_expression: "0 0 * * * ?"   # hourly: pick up new landing files (replay or live)
+        timezone_id: UTC
+        pause_status: PAUSED
+      job_clusters:
+        - job_cluster_key: main
+          new_cluster:
+            spark_version: ${var.spark_version}
+            node_type_id: ${var.node_type}
+            num_workers: 1
+            spark_env_vars:
+              CMAPSS_CONFIG: /Workspace${workspace.file_path}/configs/databricks.yaml
+      tasks:
+        - task_key: bronze
+          job_cluster_key: main
+          python_wheel_task:
+            package_name: cmapss_predictive_maintenance
+            entry_point: cmapss
+            parameters: [bronze]
+          libraries:
+            - whl: ../../dist/*.whl
+        - task_key: stream
+          depends_on: [{task_key: bronze}]
+          job_cluster_key: main
+          python_wheel_task:
+            package_name: cmapss_predictive_maintenance
+            entry_point: cmapss
+            parameters: [stream]
+          libraries:
+            - whl: ../../dist/*.whl
+
+    cmapss_model_lifecycle:
+      name: cmapss-model-lifecycle-${bundle.target}
+      job_clusters:
+        - job_cluster_key: main
+          new_cluster:
+            spark_version: ${var.spark_version}
+            node_type_id: ${var.node_type}
+            num_workers: 1
+            spark_env_vars:
+              CMAPSS_CONFIG: /Workspace${workspace.file_path}/configs/databricks.yaml
+      tasks:
+        - task_key: train
+          job_cluster_key: main
+          python_wheel_task:
+            package_name: cmapss_predictive_maintenance
+            entry_point: cmapss
+            parameters: [train]
+          libraries:
+            - whl: ../../dist/*.whl
+        - task_key: policy
+          depends_on: [{task_key: train}]
+          job_cluster_key: main
+          python_wheel_task:
+            package_name: cmapss_predictive_maintenance
+            entry_point: cmapss
+            parameters: [policy]
+          libraries:
+            - whl: ../../dist/*.whl
+        - task_key: score
+          depends_on: [{task_key: policy}]
+          job_cluster_key: main
+          python_wheel_task:
+            package_name: cmapss_predictive_maintenance
+            entry_point: cmapss
+            parameters: [score]
+          libraries:
+            - whl: ../../dist/*.whl
+        - task_key: monitor
+          depends_on: [{task_key: score}]
+          job_cluster_key: main
+          python_wheel_task:
+            package_name: cmapss_predictive_maintenance
+            entry_point: cmapss
+            parameters: [monitor, --retrain]
+          libraries:
+            - whl: ../../dist/*.whl

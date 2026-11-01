@@ -351,3 +351,13 @@ triggered it, because it uses a cross-validated metric on training engines.
 champion and is not promoted; with a real fleet, matured engines would join the training set.
 **Exercised (2026-11-01):** the per-window run above triggered a retrain; challenger version 2 reached the same
 `cv_rmse_capped` (12.306) and the alias stayed on version 1, as the rule requires.
+
+## D-030 Databricks: an asset bundle with the same entry point, a config overlay, and listed porting steps
+**Choice:** `databricks/` holds an asset bundle with two jobs (`cmapss-pipeline`: bronze → stream, hourly;
+`cmapss-model-lifecycle`: train → policy → score → monitor) whose tasks call the same `cmapss` entry point from the
+project wheel. `configs/databricks.yaml` `extends` the local config with Unity Catalog volume paths, Databricks MLflow
+tracking and the Unity Catalog registry (`registry_uri: databricks-uc`, three-level model name).
+**Why:** the jobs reuse the exact code and tests; only configuration changes. What does not carry over is listed in
+`databricks/README.md` (path-based Delta → managed tables through the three path helpers, the file log → Auto Loader,
+serving options) rather than hidden.
+**Status:** not deployed or validated against a workspace (none available); the README gives the validation steps.

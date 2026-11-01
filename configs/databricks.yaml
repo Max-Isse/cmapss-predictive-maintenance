@@ -1,0 +1,20 @@
+# Databricks overlay (phase 8, D-030): merged over config.yaml by `extends`. Set CMAPSS_CONFIG to this file in jobs.
+# Catalog/schema below match databricks/databricks.yml (dev target); prod overrides them in the bundle variables.
+extends: config.yaml
+
+paths:
+  raw_dir: /Volumes/ml_dev/cmapss/raw
+  landing_dir: /Volumes/ml_dev/cmapss/landing         # Auto Loader / replay files land here
+  lakehouse_dir: /Volumes/ml_dev/cmapss/lakehouse     # path-based Delta today; managed UC tables are a porting step
+  artifacts_dir: /Volumes/ml_dev/cmapss/artifacts
+  manifest: /Volumes/ml_dev/cmapss/raw/raw_manifest.json
+
+models:
+  mlflow:
+    tracking_uri: databricks
+    registry_uri: databricks-uc
+    experiment: /Shared/cmapss-maintenance
+    registered_model: ml_dev.cmapss.cmapss_maintenance  # three-level Unity Catalog name
+
+spark:
+  master: ""                                          # ignored: get_spark returns the cluster's active session

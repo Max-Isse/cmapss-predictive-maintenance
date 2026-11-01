@@ -37,11 +37,16 @@ def resolve_tracking_uri(cfg: Config) -> str:
 
 def setup_mlflow(cfg: Config) -> tuple[MlflowClient, str]:
     mc = cfg.section("models")["mlflow"]
-    mlflow.set_tracking_uri(resolve_tracking_uri(cfg))
+    uri = resolve_tracking_uri(cfg)
+    mlflow.set_tracking_uri(uri)
+    if mc.get("registry_uri"):  # e.g. "databricks-uc": models registered in Unity Catalog
+        mlflow.set_registry_uri(str(mc["registry_uri"]))
     client = MlflowClient()
     name = str(mc["experiment"])
     exp = client.get_experiment_by_name(name)
-    if exp is None:
+    if exp is None and not uri.startswith("sqlite"):  # managed tracking (Databricks) chooses artifact storage itself
+        exp_id = client.create_experiment(name)
+    elif exp is None:
         artifacts = (cfg.root / mc["artifact_location"]).resolve()
         artifacts.mkdir(parents=True, exist_ok=True)
         exp_id = client.create_experiment(name, artifact_location=artifacts.as_uri())

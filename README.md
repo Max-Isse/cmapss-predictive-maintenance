@@ -6,11 +6,48 @@ A production-style predictive-maintenance pipeline on the NASA C-MAPSS turbofan 
 - a cost-based maintenance policy;
 - FastAPI serving, monitoring and retraining.
 
-It runs locally and maps onto Databricks Jobs, Unity Catalog and MLflow.
+It runs locally with Docker and maps onto Databricks Jobs, Unity Catalog and MLflow (`databricks/`).
 
-**Status:** phases 0–7 of 8 complete (ingestion to bronze, validated silver, gold features and labels, SYNTHETIC
-replay with incremental streaming updates, RUL and failure-risk models in MLflow, cost-based maintenance policy,
-FastAPI serving with monitoring and a retraining trigger). See [docs/phase_plan.md](docs/phase_plan.md).
+**Status:** all 8 phases complete. See [docs/phase_plan.md](docs/phase_plan.md). **Data:** NASA C-MAPSS, a
+simulation; costs are assumptions, so every saving below is an estimate under them.
+
+## Results
+
+| | |
+|---|---|
+| Data pipeline | 265,256 cycles through bronze → silver → gold; 0 quarantined (clean benchmark); idempotent re-runs insert 0 rows |
+| Features | 161 point-in-time features; per-condition normalisation lifts FD002/FD004 sensor–RUL correlation from about 0 to −0.69 |
+| SYNTHETIC replay | 104,897 test rows in 20 batches, including deliberately late rows; incremental tables equal a full rebuild (0 mismatches) |
+| RUL model (LightGBM) | RMSE 12.5 cycles vs capped RUL on the 707 official test engines (ridge 17.2, mean 44.7); 90% intervals cover 0.90 near failure |
+| Failure within 30 cycles | PR-AUC 0.93 (logistic 0.86), calibrated with isotonic regression |
+| Maintenance policy | 231 per engine vs 306 for the best fixed interval (**about 24% lower**) and 1,000 for run to failure |
+| Serving and monitoring | FastAPI + MLflow in Docker Compose; PSI drift and band-stratified performance; retraining with champion/challenger |
+
+Read next: [recommendations](reports/recommendations.md) · [model card](docs/model_card.md) ·
+[methodology](docs/methodology.md) · [decisions](docs/decisions.md) · [limitations](docs/limitations.md) ·
+[monitoring plan](docs/monitoring_plan.md) · [Databricks mapping](databricks/README.md).
+
+## Architecture
+
+```mermaid
+flowchart LR
+    NASA[(NASA C-MAPSS<br/>archive, SHA-256 pinned)] --> L[landing<br/>text + Parquet]
+    R[SYNTHETIC REPLAY<br/>test engines, batches] --> L
+    L -->|insert-only MERGE| B[(bronze<br/>Delta)]
+    B -->|rules + pandera contract| S[(silver<br/>Delta)]
+    S -->|quarantine| Q[(quarantine)]
+    S -->|feature spec fit on train| G[(gold features<br/>+ labels)]
+    B -. Structured Streaming<br/>touched engines .-> S
+    G --> T[train: grouped CV,<br/>LightGBM, conformal]
+    T --> M[(MLflow registry<br/>alias champion)]
+    T --> P[policy: cost-based<br/>threshold]
+    M --> API[FastAPI<br/>/predict]
+    P --> API
+    G -->|delta-rs lookup| API
+    API --> PL[(prediction log)]
+    PL --> MON[monitoring:<br/>PSI + band performance]
+    MON -->|trigger| T
+```
 
 ## Decision supported
 
@@ -113,6 +150,7 @@ docker compose run --rm pipeline uv run pytest
 | `src/cmapss_pm/ingest/` | download and verification, landing staging, bronze Delta loader |
 | `src/cmapss_pm/quality/` | silver rules and quarantine, pandera contract, data-quality report |
 | `src/cmapss_pm/pipeline/` | incremental bronze → silver → gold stream, replay driver and report |
+| `databricks/` | asset bundle (jobs) and mapping notes for Databricks |
 | `src/cmapss_pm/serving/` | FastAPI app, champion and policy loading, gold feature lookup, prediction log |
 | `src/cmapss_pm/monitoring/` | training baseline, PSI, band-stratified performance, retraining trigger, report |
 | `src/cmapss_pm/policy/` | policy simulation, cross-fitted thresholds, sensitivity, report |
@@ -120,4 +158,4 @@ docker compose run --rm pipeline uv run pytest
 | `src/cmapss_pm/features/` | feature spec (fit on training engines), shared feature code, labels, gold build, evidence report |
 | `docker/` | pipeline image (Java 17 + Spark 4 + Delta) and the slim API image |
 | `tests/` | pytest; Spark tests run in the container and on CI |
-| `docs/` | business case, methodology, decisions, phase plan, lineage |
+| `docs/` | business case, methodology, decisions, model card, limitations, monitoring plan, lineage, phase plan |

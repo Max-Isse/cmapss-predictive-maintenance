@@ -41,9 +41,22 @@ class Config:
         return [*s["key"], *s["settings"], *self.sensor_columns]
 
 
+def _merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
 def load_config(path: Path | str | None = None, root: Path | None = None) -> Config:
-    with Path(path or DEFAULT_CONFIG).open(encoding="utf-8") as f:
-        return Config(raw=yaml.safe_load(f), root=root or PROJECT_ROOT)
+    """Load a YAML config; `extends: <file>` (relative to it) merges it over a base config, e.g. databricks.yaml."""
+    file = Path(path or DEFAULT_CONFIG)
+    with file.open(encoding="utf-8") as f:
+        raw = yaml.safe_load(f)
+    if "extends" in raw:
+        base = load_config(file.parent / raw.pop("extends"), root).raw
+        raw = _merge(base, raw)
+    return Config(raw=raw, root=root or PROJECT_ROOT)
 
 
 def with_overrides(cfg: Config, root: Path, **sections: dict[str, Any]) -> Config:

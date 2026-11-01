@@ -1,0 +1,39 @@
+# Databricks Asset Bundle for the C-MAPSS pipeline (phase 8, D-030).
+# NOT deployed or validated against a workspace from this repository: see databricks/README.md for the mapping,
+# the porting steps that remain, and how to validate (`databricks bundle validate -t dev`).
+bundle:
+  name: cmapss-predictive-maintenance
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog
+    default: ml_dev
+  schema:
+    description: schema for the bronze, silver and gold tables and the registered model
+    default: cmapss
+  node_type:
+    description: cluster node type (cloud specific)
+    default: Standard_D4ds_v5
+  spark_version:
+    description: Databricks Runtime with Spark 4 / Delta 4 (ML runtime for LightGBM and MLflow)
+    default: 17.3.x-cpu-ml-scala2.13
+
+artifacts:
+  wheel:
+    type: whl
+    build: uv build --wheel
+    path: ..
+
+targets:
+  dev:
+    mode: development
+    default: true
+    variables:
+      catalog: ml_dev
+  prod:
+    mode: production
+    variables:
+      catalog: ml_prod
