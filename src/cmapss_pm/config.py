@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "config.yaml"
+# CMAPSS_ROOT / CMAPSS_CONFIG locate the project when the package is installed elsewhere (the API image).
+PROJECT_ROOT = Path(os.environ.get("CMAPSS_ROOT") or Path(__file__).resolve().parents[2])
+DEFAULT_CONFIG = Path(os.environ.get("CMAPSS_CONFIG") or PROJECT_ROOT / "configs" / "config.yaml")
 
 
 @dataclass(frozen=True)

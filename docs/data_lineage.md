@@ -77,3 +77,27 @@ Every count equals the row count of the NASA source file in `data/raw_manifest.j
   batch match a full recomputation from bronze row for row (0 mismatches). Gold carries one feature-spec version.
 - **Timing:** 84–163 s per batch on local Spark; split and causes in D-019 (per-batch overhead that grows with the
   tables, not with the rows delivered).
+
+## Serving and monitoring (phase 7)
+
+```
+gold.features (kept current by the stream) ──delta-rs──> API /predict (engine lookup)       docker/Dockerfile.api
+MLflow models:/cmapss-maintenance@champion ──> API (model + baseline); artifacts/policy.json ──> served threshold
+API predictions ──> lakehouse/serving/prediction_log;  `cmapss score` (replay) ──> lakehouse/serving/batch_predictions
+prediction_log ∪ batch_predictions ⨝ gold labels ──> `cmapss monitor` ──> reports/monitoring.md ──(trigger)──> challenger run in MLflow
+```
+
+| Step | Code | Rule | Decision |
+|---|---|---|---|
+| Baseline | `monitoring/baseline.py` | Feature deciles, out-of-fold output deciles and band performance, stored with the MLflow run | D-028 |
+| Serving | `serving/app.py`, `serving/store.py` | Champion via MLflow; gold row by engine key; request ID and JSON log line per request | D-026, D-027 |
+| Prediction log | `serving/store.py::PredictionLog` | Append-only Delta table: request ID, model version, threshold, key, outputs, decision | D-027 |
+| Monitoring | `monitoring/run.py` | Per replay window: PSI per feature and output; RMSE and coverage per true-RUL band vs baseline | D-028 |
+| Retraining | `monitoring/run.py::retrain_challenger` | Triggered by `monitoring.retrain_on`; promotion only on a better CV metric | D-029 |
+
+- **Result (2026-11-01):** 104,897 replay predictions scored by champion version 1 and joined with their labels.
+  Drift (PSI) fires in most windows as the replayed fleet ages; performance per true-RUL band over the whole replay is
+  within tolerance (RMSE 0.95–1.14 × the out-of-fold baseline), so no retraining is triggered
+  ([reports/monitoring.md](../reports/monitoring.md)). In compose, the API answered lookups in about 250 ms and logged
+  every prediction with its request ID.
+

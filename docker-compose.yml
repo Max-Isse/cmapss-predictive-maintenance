@@ -1,7 +1,8 @@
-# Phase 1: the pipeline container. Later phases add the API and MLflow services.
-#   docker compose build pipeline
+# pipeline: Spark/Delta steps, training, policy, scoring and monitoring (docker/Dockerfile.dev).
+# mlflow + api: tracking server and the scoring service (docker/Dockerfile.api: slim, non-root, no JVM).
+#   docker compose build pipeline mlflow   # mlflow builds the cmapss-pm-api image that api also runs
 #   docker compose run --rm pipeline uv run cmapss all
-#   docker compose run --rm pipeline uv run pytest
+#   docker compose up -d mlflow api        # API on http://localhost:8000, MLflow UI on http://localhost:5000
 services:
   pipeline:
     build:
@@ -11,5 +12,43 @@ services:
     working_dir: /app
     volumes:
       - .:/app
+      - prediction-log:/app/data/lakehouse/serving/prediction_log  # the API's log, read by `cmapss monitor`
     environment:
       - UV_PROJECT_ENVIRONMENT=/opt/venv
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    image: cmapss-pm-api
+    # the training container wrote runs to ./mlruns with artifact URIs under /app/mlruns: same path here and in api
+    command: >
+      mlflow server --backend-store-uri sqlite:////app/mlruns/mlflow.db --host 0.0.0.0 --port 5000
+      --allowed-hosts mlflow,mlflow:5000,localhost,localhost:5000,127.0.0.1,127.0.0.1:5000
+    volumes:
+      - ./mlruns:/app/mlruns
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  api:
+    image: cmapss-pm-api
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    volumes:
+      - ./mlruns:/app/mlruns:ro                              # model artifacts (resolved through the server)
+      - ./artifacts:/app/artifacts:ro                        # policy.json (served threshold)
+      - ./data/lakehouse/gold:/app/data/lakehouse/gold:ro    # gold features, kept current by the stream
+      - prediction-log:/app/data/lakehouse/serving/prediction_log  # prediction log (Delta), owned by the API user
+    ports:
+      - "8000:8000"
+
+volumes:
+  prediction-log:

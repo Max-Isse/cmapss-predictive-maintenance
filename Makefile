@@ -1,4 +1,4 @@
-.PHONY: image fetch bronze silver gold replay stream train policy all test test-local lint shell
+.PHONY: image fetch bronze silver gold replay stream train policy score monitor api-image up down all test test-local lint shell
 
 DC = docker compose run --rm pipeline
 
@@ -28,6 +28,21 @@ train:
 
 policy:
 	$(DC) uv run cmapss policy
+
+score:
+	$(DC) uv run cmapss score
+
+monitor:
+	$(DC) uv run cmapss monitor --retrain
+
+api-image:
+	docker compose build mlflow  # builds cmapss-pm-api, used by both mlflow and api
+
+up:
+	docker compose up -d mlflow api
+
+down:
+	docker compose down
 
 all:
 	$(DC) uv run cmapss all

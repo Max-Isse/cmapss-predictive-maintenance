@@ -6,7 +6,7 @@ Data: gold Delta version 24, feature spec `1035ca0e0605`;
 707 official NASA test engines (104,897 cycles) as the final holdout, used once
 for this report. Protocol and choices: D-020 to D-023; methodology sections 3-4. NASA C-MAPSS is a simulation.
 
-MLflow: run `f3af710ff1a54afe83ad257240ec0aaf`, registered `cmapss-maintenance` version 1;
+MLflow: run `b562fc0880bb475e86fd8c81ee8cc437`, registered `cmapss-maintenance` version 1;
 alias `champion` moved to this version
 (cv_rmse_capped = 12.306; previous champion:
 none).

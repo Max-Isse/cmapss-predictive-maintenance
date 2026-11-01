@@ -8,8 +8,9 @@ A production-style predictive-maintenance pipeline on the NASA C-MAPSS turbofan 
 
 It runs locally and maps onto Databricks Jobs, Unity Catalog and MLflow.
 
-**Status:** phases 0–6 of 8 complete (ingestion to bronze, validated silver, gold features and labels, SYNTHETIC
-replay with incremental streaming updates, RUL and failure-risk models in MLflow, cost-based maintenance policy). See [docs/phase_plan.md](docs/phase_plan.md).
+**Status:** phases 0–7 of 8 complete (ingestion to bronze, validated silver, gold features and labels, SYNTHETIC
+replay with incremental streaming updates, RUL and failure-risk models in MLflow, cost-based maintenance policy,
+FastAPI serving with monitoring and a retraining trigger). See [docs/phase_plan.md](docs/phase_plan.md).
 
 ## Decision supported
 
@@ -24,7 +25,7 @@ Spark needs Linux, so all Spark steps run in the project container (D-002). Prer
 [uv](https://docs.astral.sh/uv/).
 
 ```bash
-docker compose build pipeline
+docker compose build pipeline mlflow
 ```
 
 ```bash
@@ -56,6 +57,22 @@ docker compose run --rm pipeline uv run cmapss policy
 ```
 
 ```bash
+docker compose run --rm pipeline uv run cmapss score
+```
+
+```bash
+docker compose run --rm pipeline uv run cmapss monitor --retrain
+```
+
+```bash
+docker compose up -d mlflow api
+```
+
+```bash
+curl -s -X POST localhost:8000/predict -H "Content-Type: application/json" -d "{\"engine\": {\"dataset\": \"FD001\", \"split\": \"replay\", \"unit\": 7}}"
+```
+
+```bash
 docker compose run --rm pipeline uv run pytest
 ```
 
@@ -80,6 +97,13 @@ docker compose run --rm pipeline uv run pytest
   maintenance, run to failure and perfect information on full engine lives. It includes sensitivity to costs, the
   horizon and the lead time ([reports/maintenance_policy.md](reports/maintenance_policy.md)). Under the assumed
   costs the rule saves about 24% per engine against the best fixed interval (an estimate on simulated data).
+- `score` writes the champion's predictions for the replayed engines into the prediction log. `monitor` checks
+  each replay window for drift (PSI) and for performance by true-RUL band against the training baseline. With
+  `--retrain`, it trains a challenger when a retraining signal fires; the challenger is promoted only if it improves
+  the cross-validated metric ([reports/monitoring.md](reports/monitoring.md)).
+- The API (`docker/Dockerfile.api`: slim, non-root, no Java) serves `/health`, `/model-info`, `/predict` and
+  `/predict/batch` on port 8000. It loads the champion through the MLflow server (port 5000), reads gold features
+  with delta-rs, logs JSON lines with request IDs, and appends every prediction to a Delta prediction log.
 - Every threshold, path and cost assumption is in [configs/config.yaml](configs/config.yaml).
 
 ## Layout
@@ -89,9 +113,11 @@ docker compose run --rm pipeline uv run pytest
 | `src/cmapss_pm/ingest/` | download and verification, landing staging, bronze Delta loader |
 | `src/cmapss_pm/quality/` | silver rules and quarantine, pandera contract, data-quality report |
 | `src/cmapss_pm/pipeline/` | incremental bronze → silver → gold stream, replay driver and report |
+| `src/cmapss_pm/serving/` | FastAPI app, champion and policy loading, gold feature lookup, prediction log |
+| `src/cmapss_pm/monitoring/` | training baseline, PSI, band-stratified performance, retraining trigger, report |
 | `src/cmapss_pm/policy/` | policy simulation, cross-fitted thresholds, sensitivity, report |
 | `src/cmapss_pm/models/` | training data, grouped CV, baselines and LightGBM, conformal intervals, MLflow registry, report |
 | `src/cmapss_pm/features/` | feature spec (fit on training engines), shared feature code, labels, gold build, evidence report |
-| `docker/` | Linux pipeline image (Java 17 + Spark 4 + Delta) |
+| `docker/` | pipeline image (Java 17 + Spark 4 + Delta) and the slim API image |
 | `tests/` | pytest; Spark tests run in the container and on CI |
 | `docs/` | business case, methodology, decisions, phase plan, lineage |

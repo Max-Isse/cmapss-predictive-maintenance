@@ -124,6 +124,24 @@ policy:
     planned_maintenance_cost: [100, 400]
     lost_life_cost_per_cycle: [0.5, 2.0]
 
+serving:
+  # FastAPI service (phase 7, D-026, D-027). Environment variables override: MLFLOW_TRACKING_URI, CMAPSS_LOG_PREDICTIONS.
+  max_batch: 1000                   # items per /predict/batch request
+  log_predictions: true             # append every prediction to lakehouse/serving/prediction_log (Delta)
+
+monitoring:
+  # Drift and performance per window (phase 7, D-028). Windows: replay batches (cycles_per_batch cycles of age).
+  psi_bins: 10
+  psi_warn: 0.10                    # rule-of-thumb PSI levels: < 0.10 stable, 0.10-0.25 moderate, > 0.25 large
+  psi_alert: 0.25
+  drift_feature_share_alert: 0.30   # drift alert when this share of features has PSI > psi_alert
+  min_rows: 500                     # windows (or bands within them) with fewer rows are not judged
+  performance_tolerance: 0.25       # degradation: band RMSE above the out-of-fold baseline by more than 25%
+  coverage_drop: 0.10               # degradation: interval coverage below nominal by more than 0.10
+  performance_scope: period         # judge band performance over the whole period (`window`: per window; D-028)
+  retrain_on: [performance]         # signals that trigger retraining; drift alone only warns (fleet ageing shifts
+                                    # every input without the model being wrong)
+
 spark:
   master: local[4]
   shuffle_partitions: 8

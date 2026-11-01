@@ -287,3 +287,67 @@ fixed intervals (395), because a 15-cycle horizon carries no signal when a 30-cy
 **Recommendation (not yet applied):** train the served classifier with a horizon N > L (for example L + 15) and
 re-choose the threshold; the gold label `fail_within_n` stays tied to the configured lead time for evaluation.
 
+
+## D-026 Serving scores gold features; the API image has no Spark or Java (revises D-013's serving note)
+**Choice:** the API does not recompute features. A request names an engine, and the API reads that engine's latest
+(or a given) gold row with delta-rs (`deltalake`), or the client posts a full feature row. Gold rows come only from
+`features/build.py`, the single feature implementation, which the stream keeps current (D-019). Spark, Delta-Spark,
+pandera and the report libraries moved to the `pipeline` extra; the API image installs the core dependencies only.
+**Why:** one feature implementation still serves training and serving, with no skew, while the API needs no JVM:
+the image is smaller, starts in seconds and scores a row in milliseconds. D-013 had accepted a local Spark session in
+the API; with the stream maintaining gold, that is unnecessary.
+**Limit:** an engine's prediction is as fresh as the last stream run; scoring a history that never went through the
+pipeline requires the client to post the features. Measured in compose: a lookup prediction takes about 250 ms,
+mostly the delta-rs scan of the dataset partition; caching recent rows would cut it if latency mattered.
+**Found in the end-to-end run:** MLflow writes a metadata file next to a model it loads, which failed on the
+read-only artifact mount; the API now loads into a private temporary copy.
+
+## D-027 API conventions: request IDs, JSON logs, prediction log, served threshold
+**Choice:** every request gets an ID (the `X-Request-ID` header, or a generated one returned in the response) and
+one JSON log line (method, path, status, latency, request ID). Every prediction is appended to the Delta table
+`lakehouse/serving/prediction_log` with request ID, model version, threshold, engine key, outputs and decision;
+posted feature rows are stored as JSON (looked-up rows are in gold by key). The decision uses the cost-based
+threshold from `artifacts/policy.json` when it was chosen for the loaded model version, and otherwise the model's
+fixed-precision threshold; `/model-info` says which. The image runs as a non-root user with a health check;
+compose starts it after the MLflow server is healthy, and `/health` returns 503 when no model is loaded.
+**Why:** a prediction must be traceable to its request, model version and threshold, and the log is the input of
+monitoring. A model version and its threshold stay paired, so a newly promoted model never runs with another
+model's threshold.
+**Ownership (found in the end-to-end run):** the batch scorer runs as root in the pipeline container, so a table it
+created was not writable by the API's non-root user. Each writer now has its own table: `serving/batch_predictions`
+(`cmapss score`) and `serving/prediction_log` (API, on a named volume the image creates owned by that user);
+monitoring reads both.
+**Limit:** one append per request makes many small Delta files; a scheduled `OPTIMIZE` would compact them.
+
+## D-028 Monitoring: PSI drift per window, performance by true-RUL band against an out-of-fold baseline
+**Choice:** at training, a baseline is stored with the MLflow run: training deciles of every feature, out-of-fold
+deciles of both outputs, and out-of-fold RMSE and interval coverage per true-RUL band. `cmapss score` writes the
+champion's predictions for the replay into the prediction log; `cmapss monitor` joins them with their labels and,
+per replay window, computes PSI per feature and output, and RMSE and coverage per band. Performance is degraded
+when a band with at least 500 rows has RMSE above 1.25 × baseline or coverage 0.10 below nominal; drift is
+alerted when at least 30% of features have PSI above 0.25.
+**Why out-of-fold:** the replayed engines are the official test engines, so a test-set baseline would compare the
+data with itself. **Why bands:** an ageing fleet has more rows near failure, where errors differ; comparing within
+bands keeps a change of mix from reading as a worse model.
+**Labels:** for the replay they are known in advance (NASA RUL); a live fleet learns them only after failure, so
+performance monitoring always lags.
+**Scope of the performance judgement (changed after the first run):** the first run judged each window and fired:
+8 windows had a band beyond tolerance, mostly the >125 band of windows 4–9 (RMSE up to 1.75 × baseline). Those rows
+are engines already 76–225 cycles old yet far from failure, which the model, using age, predicts conservatively;
+because the replay starts every engine together, each window is one age group. Over the whole replay every band is
+within tolerance (RMSE 0.95–1.14 × baseline). The retraining signal is therefore judged over the whole period
+(`monitoring.performance_scope: period`); per-window cells stay in the report as diagnostics. Drift fires in most
+windows (fleet ageing) and only warns.
+
+## D-029 Retraining trigger and challenger vs champion
+**Choice:** `monitoring.retrain_on` lists the signals that trigger retraining; by default performance only. Drift
+alone warns, because an ageing fleet shifts every input without the model being wrong. `cmapss monitor --retrain`
+trains a challenger when triggered (`--force-retrain` regardless) with the same training pipeline on the current
+gold version; it is registered as a new version, and the champion alias moves only if the challenger improves
+`cv_rmse_capped` (D-023). The API picks up a new champion on restart.
+**Why:** retraining is an ordinary, logged, reproducible run; the promotion rule cannot be gamed by the data that
+triggered it, because it uses a cross-validated metric on training engines.
+**Limit:** in this benchmark no new run-to-failure engines arrive, so a challenger trains on the same data as the
+champion and is not promoted; with a real fleet, matured engines would join the training set.
+**Exercised (2026-11-01):** the per-window run above triggered a retrain; challenger version 2 reached the same
+`cv_rmse_capped` (12.306) and the alias stayed on version 1, as the rule requires.

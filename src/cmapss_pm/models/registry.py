@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any
 
 import mlflow
@@ -21,14 +22,22 @@ from cmapss_pm.models.pyfunc import MaintenanceBundle, MaintenancePyfunc
 log = logging.getLogger(__name__)
 
 
-def setup_mlflow(cfg: Config) -> tuple[MlflowClient, str]:
-    mc = cfg.section("models")["mlflow"]
-    uri = str(mc["tracking_uri"])
+def resolve_tracking_uri(cfg: Config) -> str:
+    """MLFLOW_TRACKING_URI if set (the API container uses the MLflow server), else the config's SQLite store."""
+    env = os.environ.get("MLFLOW_TRACKING_URI")
+    if env:
+        return env
+    uri = str(cfg.section("models")["mlflow"]["tracking_uri"])
     if uri.startswith("sqlite:///") and not uri.startswith("sqlite:////"):  # relative to the project root
         db = cfg.root / uri.removeprefix("sqlite:///")
         db.parent.mkdir(parents=True, exist_ok=True)
         uri = f"sqlite:///{db.as_posix()}"
-    mlflow.set_tracking_uri(uri)
+    return uri
+
+
+def setup_mlflow(cfg: Config) -> tuple[MlflowClient, str]:
+    mc = cfg.section("models")["mlflow"]
+    mlflow.set_tracking_uri(resolve_tracking_uri(cfg))
     client = MlflowClient()
     name = str(mc["experiment"])
     exp = client.get_experiment_by_name(name)

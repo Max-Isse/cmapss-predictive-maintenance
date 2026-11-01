@@ -112,23 +112,10 @@ def cmd_replay(cfg: Config, batches: int) -> None:
 
 
 def cmd_train(cfg: Config) -> None:
-    from mlflow.tracking import MlflowClient
-
-    from cmapss_pm.models.data import load_model_data
-    from cmapss_pm.models.registry import log_and_register
-    from cmapss_pm.models.report import evaluate, write_model_report
-    from cmapss_pm.models.train import train_all
+    from cmapss_pm.models.pipeline import train_and_register
     from cmapss_pm.spark import get_spark
 
-    data = load_model_data(get_spark(cfg), cfg)
-    log.info("model data: %s", json.dumps(data.meta))
-    res = train_all(data, cfg)
-    ev = evaluate(res, cfg)
-    log.info("metrics: %s", json.dumps({k: round(v, 4) for k, v in ev["flat"].items()}))
-    info = log_and_register(cfg, res.bundle, ev["flat"], data.test)
-    path = write_model_report(res, ev, cfg, info)
-    MlflowClient().log_artifact(info["run_id"], str(path), "reports")
-    log.info("report %s", path)
+    train_and_register(get_spark(cfg), cfg)
 
 
 def cmd_policy(cfg: Config) -> None:
@@ -148,15 +135,32 @@ def cmd_policy(cfg: Config) -> None:
     )
 
 
+def cmd_score(cfg: Config) -> None:
+    from cmapss_pm.monitoring.run import score_split
+
+    log.info("scored: %s", json.dumps(score_split(cfg, "replay")))
+
+
+def cmd_monitor(cfg: Config, retrain: bool, force_retrain: bool) -> None:
+    from cmapss_pm.monitoring.report import write_monitoring_report
+    from cmapss_pm.monitoring.run import monitor
+
+    res = monitor(cfg, retrain=retrain, force_retrain=force_retrain)
+    path = write_monitoring_report(res, cfg)
+    log.info("monitoring signals %s; retrain %s; report %s", json.dumps(res.signals), json.dumps(res.retrain), path)
+
+
 STEPS = ["fetch", "bronze", "silver", "gold"]
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="cmapss", description=__doc__)
-    parser.add_argument("step", choices=[*STEPS, "all", "stream", "replay", "train", "policy"])
+    parser.add_argument("step", choices=[*STEPS, "all", "stream", "replay", "train", "policy", "score", "monitor"])
     parser.add_argument("--config", default=None)
     parser.add_argument("--force", action="store_true", help="fetch: re-download; bronze: re-read already-logged files")
     parser.add_argument("--batches", type=int, default=1, help="replay: number of SYNTHETIC REPLAY batches to deliver")
+    parser.add_argument("--retrain", action="store_true", help="monitor: train a challenger if a retrain signal fires")
+    parser.add_argument("--force-retrain", action="store_true", help="monitor: train a challenger regardless")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     cfg = load_config(args.config)
@@ -169,6 +173,8 @@ def main(argv: list[str] | None = None) -> None:
         "replay": lambda: cmd_replay(cfg, args.batches),
         "train": lambda: cmd_train(cfg),
         "policy": lambda: cmd_policy(cfg),
+        "score": lambda: cmd_score(cfg),
+        "monitor": lambda: cmd_monitor(cfg, args.retrain, args.force_retrain),
     }
     for name in STEPS if args.step == "all" else [args.step]:
         steps[name]()
