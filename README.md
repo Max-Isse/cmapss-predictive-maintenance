@@ -8,8 +8,8 @@ A production-style predictive-maintenance pipeline on the NASA C-MAPSS turbofan 
 
 It runs locally and maps onto Databricks Jobs, Unity Catalog and MLflow.
 
-**Status:** phases 0–4 of 8 complete (ingestion to bronze, validated silver, gold features and labels, SYNTHETIC
-replay with incremental streaming updates). See [docs/phase_plan.md](docs/phase_plan.md).
+**Status:** phases 0–5 of 8 complete (ingestion to bronze, validated silver, gold features and labels, SYNTHETIC
+replay with incremental streaming updates, RUL and failure-risk models in MLflow). See [docs/phase_plan.md](docs/phase_plan.md).
 
 ## Decision supported
 
@@ -48,6 +48,10 @@ docker compose run --rm pipeline uv run cmapss replay --batches 20
 ```
 
 ```bash
+docker compose run --rm pipeline uv run cmapss train
+```
+
+```bash
 docker compose run --rm pipeline uv run pytest
 ```
 
@@ -64,6 +68,10 @@ docker compose run --rm pipeline uv run pytest
   cycles per engine per batch, with 5 deliberately late rows per batch. Each batch goes through bronze, then a
   Structured Streaming step (`cmapss stream`) recomputes silver and gold for the engines it touched. The run
   checks that the result equals a full rebuild ([reports/replay.md](reports/replay.md)).
+- `train` cross-validates the baselines and LightGBM models by engine, fits the calibrator and conformal intervals,
+  scores the official NASA test engines once, logs everything to MLflow (`mlruns/`) and registers the bundle as
+  `cmapss-maintenance` with alias `champion` when it improves. Results:
+  [reports/model_comparison.md](reports/model_comparison.md).
 - Every threshold, path and cost assumption is in [configs/config.yaml](configs/config.yaml).
 
 ## Layout
@@ -73,6 +81,7 @@ docker compose run --rm pipeline uv run pytest
 | `src/cmapss_pm/ingest/` | download and verification, landing staging, bronze Delta loader |
 | `src/cmapss_pm/quality/` | silver rules and quarantine, pandera contract, data-quality report |
 | `src/cmapss_pm/pipeline/` | incremental bronze → silver → gold stream, replay driver and report |
+| `src/cmapss_pm/models/` | training data, grouped CV, baselines and LightGBM, conformal intervals, MLflow registry, report |
 | `src/cmapss_pm/features/` | feature spec (fit on training engines), shared feature code, labels, gold build, evidence report |
 | `docker/` | Linux pipeline image (Java 17 + Spark 4 + Delta) |
 | `tests/` | pytest; Spark tests run in the container and on CI |

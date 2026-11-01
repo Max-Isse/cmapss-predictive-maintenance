@@ -145,7 +145,12 @@ cycle (left for the models, which handle missing values).
 above RUL ≈ 170 and rises over the last 100–150 cycles. The least-squares hinge optimum is 95 (biased low because
 wear accelerates); 125 sits between the two, costs 7.6% more hinge SSE than the optimum, is below the 5% quantile
 of training engine life (149), and is the usual C-MAPSS choice, keeping RMSE comparable with published work.
-**Sensitivity:** to be checked in phase 5 (models trained with caps 100, 125, 150).
+**Sensitivity (phase 5, `reports/model_comparison.md` §4):** a cap of 100 is more accurate where true RUL is at most
+100 (out-of-fold RMSE 10.8 vs 14.0 at 125) and on test engines with true RUL at most 125 (12.1 vs 12.6), but it is
+much worse on all test engines (RMSE 29.6 vs 22.7, NASA score 38,867 vs 12,864), because every healthy engine is
+predicted at 100. A cap of 150 is the reverse (20.9 overall, 16.3 for true RUL at most 125). 125 is kept: the
+maintenance decision uses P(fail within 30) from the classifier (phase 6), so the cap shapes only the RUL output,
+where 125 balances the two regions.
 
 ## D-017 Failure-within-N label with N = the maintenance lead time (30 cycles)
 **Choice:** `fail_within_n = 1` when `rul <= 30`, N read from `business.maintenance_lead_time_cycles`; labels are
@@ -195,3 +200,52 @@ deletion vectors so `replaceWhere` marks rows instead of rewriting files, and fe
 an Auto Loader source in place of the file-level bronze loader (phase 8 notes).
 **Limits:** new RUL deliveries are not streamed; `cmapss silver` rebuilds the RUL table. The feature spec is
 read, never refitted, by the stream: refitting is a deliberate `cmapss gold` run.
+
+## D-020 Evaluation protocol: grouped CV on training engines, official test engines as a one-time holdout
+**Choice:** all fitting and every choice (calibrator, alert threshold, conformal correction, cap comparison,
+champion promotion) uses 5-fold GroupKFold by engine on the 709 training engines. Final models are refitted on all
+training engines and score the 707 official test engines once, for the report. The official C-MAPSS figure is each
+test engine's last cycle against the NASA RUL; all test cycles are also reported (more rows, all RUL bands).
+**Why:** rows of one engine are strongly autocorrelated, so a row-level split would put near-copies of validation
+rows in training and flatter every metric. Choosing anything on the test set would make it a validation set.
+**Leakage tests:** folds never share an engine and cover every row once; model inputs exclude labels and
+identifiers (`tests/test_models.py`); feature constants come from training engines only (D-013); features are
+point-in-time (D-015).
+
+## D-021 Models: baselines, then LightGBM with fixed settings; no hyperparameter search
+**Choice:** RUL: mean of the capped target, ridge regression on the same 161 features ("linear degradation"
+baseline), LightGBM. Failure within N: prevalence, logistic regression, LightGBM, and LightGBM with an isotonic
+calibrator fitted on out-of-fold probabilities. LightGBM settings are fixed in config (500 trees, learning rate
+0.03, 31 leaves, at least 200 rows per leaf, row and column subsampling): conservative values for ~160k
+autocorrelated rows.
+**Why:** the gain over baselines is the evidence that the model learns; a search over hyperparameters would add
+little information on a benchmark this size and costs a nested CV to report honestly. XGBoost would be a like-for-
+like alternative to LightGBM and is not run.
+**Alert threshold:** the lowest probability that reaches 80% precision on out-of-fold predictions
+(`models.fixed_precision`, an ASSUMPTION). Phase 6 replaces it with a cost-based threshold.
+
+## D-022 Prediction intervals: conformalized quantile regression, corrected per band of predicted RUL
+**Choice:** LightGBM quantile models (5% and 95%) of the **uncapped** RUL, clipped to the cap, give a per-row
+interval for the capped RUL. A conformal correction q, the ⌈(n+1)(1−α)⌉/n quantile of max(lower − y, y − upper)
+over out-of-fold rows, is computed separately for each band of *predicted* RUL (≤30, 30–60, 60–90, 90–115, >115;
+`models.interval_group_bounds`; Mondrian conformal), for 90% nominal coverage within each band. The interval is
+clipped to [0, cap] and always contains the point prediction. Bands with fewer than 20/α rows use the pooled q.
+**What went wrong first (kept as a lesson):** with quantile models of the *capped* RUL, the 95% model predicted the
+constant 125 for every row: about 40% of training rows sit exactly at the cap, so the upper quantile of the target is
+the cap, the quantile loss has no gradient to split on, and the model never leaves its initial value. Intervals
+near failure were then 108 cycles wide, and a single pooled correction was pinned at 0 by the many rows exactly at
+the cap, so coverage fell to 0.84–0.87 in the bands that matter. Training on the uncapped RUL and correcting per
+predicted band fixed both: in the 0–30 true-RUL band the test coverage is 0.90 at a mean width of 24 cycles.
+**Caveats:** conformal guarantees are marginal within each *predicted* band and assume exchangeable rows; rows of one
+engine are not independent. Coverage by *true*-RUL band is not guaranteed and is reported: on the test engines it is
+below nominal at 31–60 and 61–125 (`reports/model_comparison.md`). In the two upper bands q is 0: most of their rows
+are at the cap and score exactly 0, so the interval is the quantile models' own (over-covering above 115).
+
+## D-023 MLflow: SQLite tracking, one pyfunc bundle, "champion" alias moved only on improvement
+**Choice:** tracking in `mlruns/mlflow.db` (git-ignored) with artifacts under `mlruns/artifacts`. Each run logs the
+LightGBM settings, the gold Delta version and feature spec version (tags), CV and test metrics, the config, and the
+report. One registered model, `cmapss-maintenance`, holds a pyfunc that returns RUL, its interval, the calibrated
+failure probability and the alert. Alias `champion` moves to a new version only when `cv_rmse_capped` (a CV metric,
+never a test metric) improves.
+**Why:** serving loads `models:/cmapss-maintenance@champion` and gets every output from one versioned artifact,
+traceable to the exact data version. Phase 7 reuses the same promotion rule for challenger runs.

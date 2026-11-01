@@ -1,4 +1,4 @@
-.PHONY: image fetch bronze silver gold replay stream all test test-local lint shell
+.PHONY: image fetch bronze silver gold replay stream train all test test-local lint shell
 
 DC = docker compose run --rm pipeline
 
@@ -22,6 +22,9 @@ replay:
 
 stream:
 	$(DC) uv run cmapss stream
+
+train:
+	$(DC) uv run cmapss train
 
 all:
 	$(DC) uv run cmapss all

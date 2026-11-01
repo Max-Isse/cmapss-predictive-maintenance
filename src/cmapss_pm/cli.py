@@ -111,12 +111,32 @@ def cmd_replay(cfg: Config, batches: int) -> None:
         raise SystemExit(f"incremental tables differ from a full recomputation: {check}")
 
 
+def cmd_train(cfg: Config) -> None:
+    from mlflow.tracking import MlflowClient
+
+    from cmapss_pm.models.data import load_model_data
+    from cmapss_pm.models.registry import log_and_register
+    from cmapss_pm.models.report import evaluate, write_model_report
+    from cmapss_pm.models.train import train_all
+    from cmapss_pm.spark import get_spark
+
+    data = load_model_data(get_spark(cfg), cfg)
+    log.info("model data: %s", json.dumps(data.meta))
+    res = train_all(data, cfg)
+    ev = evaluate(res, cfg)
+    log.info("metrics: %s", json.dumps({k: round(v, 4) for k, v in ev["flat"].items()}))
+    info = log_and_register(cfg, res.bundle, ev["flat"], data.test)
+    path = write_model_report(res, ev, cfg, info)
+    MlflowClient().log_artifact(info["run_id"], str(path), "reports")
+    log.info("report %s", path)
+
+
 STEPS = ["fetch", "bronze", "silver", "gold"]
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="cmapss", description=__doc__)
-    parser.add_argument("step", choices=[*STEPS, "all", "stream", "replay"])
+    parser.add_argument("step", choices=[*STEPS, "all", "stream", "replay", "train"])
     parser.add_argument("--config", default=None)
     parser.add_argument("--force", action="store_true", help="fetch: re-download; bronze: re-read already-logged files")
     parser.add_argument("--batches", type=int, default=1, help="replay: number of SYNTHETIC REPLAY batches to deliver")
@@ -130,6 +150,7 @@ def main(argv: list[str] | None = None) -> None:
         "gold": lambda: cmd_gold(cfg),
         "stream": lambda: cmd_stream(cfg),
         "replay": lambda: cmd_replay(cfg, args.batches),
+        "train": lambda: cmd_train(cfg),
     }
     for name in STEPS if args.step == "all" else [args.step]:
         steps[name]()

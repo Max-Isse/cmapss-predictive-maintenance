@@ -85,6 +85,32 @@ replay:
   cycles_per_batch: 25              # cycles each engine flies between two deliveries
   late_rows: 5                      # SYNTHETIC disturbance per batch: rows held back to the next batch; 0 = none
 
+models:
+  # Training engines only; the official NASA test engines are the final holdout, evaluated once (D-020).
+  cv_folds: 5                       # GroupKFold by engine: no engine is in both a training and a validation fold
+  n_jobs: 4
+  rul_bands: [0, 30, 60, 125, 1000] # segments by true RUL, cycles: (0,30], (30,60], (60,125], >125 (0 included)
+  fixed_precision: 0.80             # ASSUMPTION: report recall at this precision; threshold set on CV predictions
+  interval_alpha: 0.10              # 90% prediction intervals: conformalized quantile regression (D-022)
+  interval_group_bounds: [30, 60, 90, 115]  # conformal correction per band of PREDICTED RUL (D-022)
+  cap_sensitivity: [100, 150]       # extra RUL caps compared with features.rul_cap (D-016)
+  lightgbm:                         # fixed, conservative settings; not tuned on the test set (D-021)
+    n_estimators: 500
+    learning_rate: 0.03
+    num_leaves: 31
+    min_child_samples: 200
+    subsample: 0.8
+    subsample_freq: 1
+    colsample_bytree: 0.5
+    reg_lambda: 1.0
+  mlflow:
+    tracking_uri: sqlite:///mlruns/mlflow.db
+    artifact_location: mlruns/artifacts
+    experiment: cmapss-maintenance
+    registered_model: cmapss-maintenance
+    champion_alias: champion
+    primary_metric: cv_rmse_capped  # lower is better; the alias moves only when a new version improves it
+
 spark:
   master: local[4]
   shuffle_partitions: 8
