@@ -22,6 +22,14 @@ data/landing/replay/  ← SYNTHETIC REPLAY of test engines, cycle by cycle (real
 | Landing | `ingest/convert.py` | Text copied; Parquet parsed from the same text | D-005 |
 | Bronze | `ingest/bronze.py` | Values as delivered + raw line; metadata; insert-only MERGE; file-level skip | D-003, D-004 |
 
+## Silver (`cmapss silver`; report: `reports/data_quality/latest.md`)
+
+- **Result:** all 265,256 bronze cycles and 707 RUL rows pass the six row rules and the pandera contract, and
+  none are quarantined. Reconciliation (bronze = silver + quarantine) holds.
+- **What that confirms:** the NASA benchmark is clean. There are no gaps in any engine's cycles, no conflicting
+  duplicates and no out-of-range values. The rules exist for the replayed and future data, and each one is
+  demonstrated on deliberately broken deliveries in `tests/test_silver.py`.
+
 ## Bronze row counts (`reports/tables/bronze_counts.csv`, written by `cmapss bronze`)
 
 | Table | Dataset | Split | Rows | Engines | Malformed |

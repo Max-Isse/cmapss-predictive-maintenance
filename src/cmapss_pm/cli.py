@@ -52,7 +52,24 @@ def cmd_bronze(cfg: Config, force: bool) -> None:
     )
 
 
-STEPS = ["fetch", "bronze"]
+def cmd_silver(cfg: Config) -> None:
+    from cmapss_pm.quality.contract import silver_cycles_schema, silver_rul_schema, validate
+    from cmapss_pm.quality.report import write_report
+    from cmapss_pm.quality.silver import build_silver, silver_path
+    from cmapss_pm.spark import get_spark
+
+    spark = get_spark(cfg)
+    res = build_silver(spark, cfg)
+    cycles = spark.read.format("delta").load(silver_path(cfg, "cycles"))
+    rul = spark.read.format("delta").load(silver_path(cfg, "rul"))
+    errors = validate(silver_cycles_schema(cfg), cycles) + validate(silver_rul_schema(cfg), rul)
+    path = write_report(spark, cfg, res, errors)
+    log.info("silver %s: %s; quarantine by rule %s; report %s", res.run_id, res.counts, res.quarantine_by_rule, path)
+    if errors:
+        raise SystemExit(f"silver contract failed ({len(errors)} checks): see {path}")
+
+
+STEPS = ["fetch", "bronze", "silver"]
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -66,6 +83,7 @@ def main(argv: list[str] | None = None) -> None:
     steps: dict[str, Callable[[], None]] = {
         "fetch": lambda: cmd_fetch(cfg, args.force),
         "bronze": lambda: cmd_bronze(cfg, args.force),
+        "silver": lambda: cmd_silver(cfg),
     }
     for name in STEPS if args.step == "all" else [args.step]:
         steps[name]()

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Development / pipeline image: Python 3.11 + Java 17 (Spark 4) + uv + the locked dependencies.
 # The repository is bind-mounted at /app; the virtualenv lives at /opt/venv so the host's .venv is never touched.
 FROM python:3.11.11-slim-bookworm
@@ -19,7 +20,8 @@ ENV JAVA_HOME=/opt/java \
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-install-project
+# uv's download cache is a BuildKit cache mount, so a lock change re-downloads only what changed.
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-install-project
 
 # Resolve the Delta Lake jars once at build time so Spark sessions start offline.
 COPY docker/warm_ivy.py /tmp/warm_ivy.py

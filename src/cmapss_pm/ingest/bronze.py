@@ -87,7 +87,12 @@ def read_source(spark: SparkSession, cfg: Config, sf: SourceFile) -> DataFrame:
 
 def with_metadata(df: DataFrame, cfg: Config, sf: SourceFile, run_id: str, file_sha: str) -> DataFrame:
     cols = _columns(cfg, sf)
-    hash_cols = [F.col(c).cast("double") for c in (["unit", *cols] if sf.table == "rul" else cols)]
+    names = ["unit", *cols] if sf.table == "rul" else cols
+    # try_cast: bronze must accept any delivered text (Spark's ANSI cast would fail the whole load on "abc")
+    hash_cols = [F.col(c).try_cast("double") for c in names]
+    all_numeric = F.lit(True)
+    for c in names:
+        all_numeric = all_numeric & (F.col(c).isNull() | F.col(c).try_cast("double").isNotNull())
     return (
         df.withColumn("dataset", F.lit(sf.dataset))
         .withColumn("split", F.lit(sf.split))
@@ -99,7 +104,9 @@ def with_metadata(df: DataFrame, cfg: Config, sf: SourceFile, run_id: str, file_
         # hash of the values (format-independent); malformed text rows hash their raw line instead
         .withColumn(
             "_record_hash",
-            F.when(F.col(cols[0]).isNotNull(), F.xxhash64(*hash_cols)).otherwise(F.xxhash64("_raw_line")),
+            F.when(F.col(cols[0]).isNull(), F.xxhash64("_raw_line"))  # malformed line
+            .when(all_numeric, F.xxhash64(*hash_cols))  # numeric values: format-independent
+            .otherwise(F.xxhash64(*[F.col(c) for c in names])),  # non-numeric text: hash the delivered strings
         )
     )
 

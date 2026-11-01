@@ -26,6 +26,37 @@ schema:
   settings: [op_setting_1, op_setting_2, op_setting_3]
   n_sensors: 21
 
+validation:
+  # Contract ranges (inclusive): TRAINING min/max widened by `range_margin` x range on each side, fixed here
+  # once from the training files (D-007). Test values all fall inside the unwidened training ranges.
+  range_margin: 0.10
+  max_cycle: 1000                           # sanity bound on the cycle counter
+  ranges:
+    op_setting_1: [-4.2104, 46.2097]
+    op_setting_2: [-0.0849, 0.9263]
+    op_setting_3: [56.0000, 104.0000]
+    sensor_01: [437.6330, 526.0370]
+    sensor_02: [524.5170, 656.0730]
+    sensor_03: [1205.2460, 1654.3340]
+    sensor_04: [981.9980, 1483.2620]
+    sensor_05: [2.8390, 15.6910]
+    sensor_06: [4.0760, 23.2040]
+    sensor_07: [92.7060, 614.2740]
+    sensor_08: [1867.3280, 2436.0320]
+    sensor_09: [7858.5020, 9370.5980]
+    sensor_10: [0.8910, 1.3590]
+    sensor_11: [34.7910, 49.7790]
+    sensor_12: [87.3920, 578.4080]
+    sensor_13: [1991.2780, 2426.7820]
+    sensor_14: [7800.9860, 8338.5140]
+    sensor_15: [7.8652, 11.3580]
+    sensor_16: [0.0190, 0.0310]
+    sensor_17: [292.2000, 409.8000]
+    sensor_18: [1867.7000, 2435.3000]
+    sensor_19: [83.4230, 101.5070]
+    sensor_20: [7.1870, 42.8630]
+    sensor_21: [4.2165, 25.7445]
+
 business:
   # ---- ASSUMPTIONS (costs in thousand currency units; no real cost data accompany C-MAPSS) ----
   unplanned_failure_cost: 1000          # ASSUMPTION: in-service failure incl. disruption, secondary damage, AOG
