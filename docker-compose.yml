@@ -1,0 +1,15 @@
+# Phase 1: the pipeline container. Later phases add the API and MLflow services.
+#   docker compose build pipeline
+#   docker compose run --rm pipeline uv run cmapss all
+#   docker compose run --rm pipeline uv run pytest
+services:
+  pipeline:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    image: cmapss-pm-dev
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment:
+      - UV_PROJECT_ENVIRONMENT=/opt/venv

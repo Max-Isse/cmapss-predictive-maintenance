@@ -1,0 +1,75 @@
+"""Command-line entry point: `cmapss <step>` (Spark steps run inside the project container, see README)."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+from collections.abc import Callable
+
+from cmapss_pm.config import Config, load_config
+
+log = logging.getLogger("cmapss")
+
+
+def cmd_fetch(cfg: Config, force: bool) -> None:
+    from cmapss_pm.ingest.convert import stage_landing
+    from cmapss_pm.ingest.fetch import fetch
+
+    staged = stage_landing(cfg, fetch(cfg, force=force))
+    log.info("landing: %s text files, %s Parquet files", len(staged["text"]), len(staged["parquet"]))
+
+
+def cmd_bronze(cfg: Config, force: bool) -> None:
+    from cmapss_pm.ingest.bronze import ingest_landing
+    from cmapss_pm.spark import get_spark
+
+    spark = get_spark(cfg)
+    results = ingest_landing(spark, cfg, force=force)
+    for r in results:
+        log.info(
+            "%-24s %-8s %-7s %-7s read=%-6s inserted=%s", r.file, r.fmt, r.table, r.status, r.rows_read, r.rows_inserted
+        )
+    import pandas as pd
+
+    from cmapss_pm.ingest.bronze import bronze_counts
+
+    counts = pd.DataFrame(bronze_counts(spark, cfg))
+    out = cfg.path("tables_dir") / "bronze_counts.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    counts.to_csv(out, index=False)
+    pd.DataFrame([r.__dict__ for r in results]).to_csv(cfg.path("tables_dir") / "bronze_last_run.csv", index=False)
+    log.info("wrote %s", out)
+    log.info(
+        "summary: %s",
+        json.dumps(
+            {
+                "files": len(results),
+                "loaded": sum(r.status == "loaded" for r in results),
+                "rows_inserted": sum(r.rows_inserted for r in results),
+            }
+        ),
+    )
+
+
+STEPS = ["fetch", "bronze"]
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="cmapss", description=__doc__)
+    parser.add_argument("step", choices=[*STEPS, "all"])
+    parser.add_argument("--config", default=None)
+    parser.add_argument("--force", action="store_true", help="fetch: re-download; bronze: re-read already-logged files")
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    cfg = load_config(args.config)
+    steps: dict[str, Callable[[], None]] = {
+        "fetch": lambda: cmd_fetch(cfg, args.force),
+        "bronze": lambda: cmd_bronze(cfg, args.force),
+    }
+    for name in STEPS if args.step == "all" else [args.step]:
+        steps[name]()
+
+
+if __name__ == "__main__":
+    main()

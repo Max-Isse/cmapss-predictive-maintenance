@@ -1,0 +1,13 @@
+table,dataset,split,rows,units,malformed_rows,formats_seen
+cycles,FD001,test,13096,100,0,1
+cycles,FD001,train,20631,100,0,1
+cycles,FD002,test,33991,259,0,1
+cycles,FD002,train,53759,260,0,1
+cycles,FD003,test,16596,100,0,1
+cycles,FD003,train,24720,100,0,1
+cycles,FD004,test,41214,248,0,1
+cycles,FD004,train,61249,249,0,1
+rul,FD001,rul,100,100,0,1
+rul,FD002,rul,259,259,0,1
+rul,FD003,rul,100,100,0,1
+rul,FD004,rul,248,248,0,1

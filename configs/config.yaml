@@ -1,0 +1,39 @@
+# Single source of truth for paths, thresholds, seeds and business assumptions.
+# Values marked ASSUMPTION are not estimated from data; they are varied in sensitivity analysis.
+
+seed: 20261101
+
+paths:
+  raw_dir: data/raw                  # downloaded archive + extracted NASA text files (git-ignored)
+  landing_dir: data/landing          # files waiting to be ingested: text, Parquet conversions, replay batches
+  lakehouse_dir: data/lakehouse      # Delta tables: bronze/, silver/, gold/ (git-ignored)
+  manifest: data/raw_manifest.json   # committed: source URL, archive SHA-256, per-file row counts
+  reports_dir: reports
+  tables_dir: reports/tables
+  figures_dir: reports/figures
+
+source:
+  # Official NASA Prognostics Center of Excellence repository, data set 6 (C-MAPSS).
+  page: https://www.nasa.gov/intelligent-systems-division/discovery-and-systems-health/pcoe/pcoe-data-set-repository/
+  url: https://phm-datasets.s3.amazonaws.com/NASA/6.+Turbofan+Engine+Degradation+Simulation+Data+Set.zip
+  archive_sha256: c9c5dec12a945a82e8bb4446589d7fb3cc057b5e5d81fa1a12e25ee9912ad3b2
+  inner_archive: CMAPSSData.zip
+  datasets: [FD001, FD002, FD003, FD004]
+
+schema:
+  # 26 space-separated numeric columns per row (one row = one engine operating cycle).
+  key: [unit, cycle]
+  settings: [op_setting_1, op_setting_2, op_setting_3]
+  n_sensors: 21
+
+business:
+  # ---- ASSUMPTIONS (costs in thousand currency units; no real cost data accompany C-MAPSS) ----
+  unplanned_failure_cost: 1000          # ASSUMPTION: in-service failure incl. disruption, secondary damage, AOG
+  planned_maintenance_cost: 200         # ASSUMPTION: scheduled shop visit
+  lost_life_cost_per_cycle: 1.0         # ASSUMPTION: value of each cycle of useful life given up by pulling early
+  maintenance_lead_time_cycles: 30      # ASSUMPTION: cycles needed to schedule a shop visit = N in "fail within N"
+
+spark:
+  master: local[4]
+  shuffle_partitions: 8
+  driver_memory: 4g
