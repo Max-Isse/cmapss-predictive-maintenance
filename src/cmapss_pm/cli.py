@@ -131,12 +131,29 @@ def cmd_train(cfg: Config) -> None:
     log.info("report %s", path)
 
 
+def cmd_policy(cfg: Config) -> None:
+    from cmapss_pm.models.data import load_model_data
+    from cmapss_pm.policy.report import write_policy_report
+    from cmapss_pm.policy.run import run_policy, save_policy
+    from cmapss_pm.spark import get_spark
+
+    run = run_policy(load_model_data(get_spark(cfg), cfg), cfg)
+    doc = save_policy(cfg, run)
+    path = write_policy_report(run, cfg)
+    log.info(
+        "policy: threshold %.4f, expected cost per engine %.1f; report %s",
+        run.threshold,
+        doc["expected_cost_per_engine_cross_fitted"],
+        path,
+    )
+
+
 STEPS = ["fetch", "bronze", "silver", "gold"]
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="cmapss", description=__doc__)
-    parser.add_argument("step", choices=[*STEPS, "all", "stream", "replay", "train"])
+    parser.add_argument("step", choices=[*STEPS, "all", "stream", "replay", "train", "policy"])
     parser.add_argument("--config", default=None)
     parser.add_argument("--force", action="store_true", help="fetch: re-download; bronze: re-read already-logged files")
     parser.add_argument("--batches", type=int, default=1, help="replay: number of SYNTHETIC REPLAY batches to deliver")
@@ -151,6 +168,7 @@ def main(argv: list[str] | None = None) -> None:
         "stream": lambda: cmd_stream(cfg),
         "replay": lambda: cmd_replay(cfg, args.batches),
         "train": lambda: cmd_train(cfg),
+        "policy": lambda: cmd_policy(cfg),
     }
     for name in STEPS if args.step == "all" else [args.step]:
         steps[name]()

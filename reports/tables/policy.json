@@ -1,0 +1,56 @@
+{
+  "champion_version": 1,
+  "champion_run_id": "f3af710ff1a54afe83ad257240ec0aaf",
+  "gold_delta_version": 24,
+  "feature_spec_version": "1035ca0e0605",
+  "horizon": 30,
+  "lead_time": 30,
+  "costs": {
+    "unplanned": 1000.0,
+    "planned": 200.0,
+    "lost_life": 1.0
+  },
+  "threshold": 0.009422850412249705,
+  "threshold_by_fold": {
+    "0": 0.01167883211678832,
+    "1": 0.009375,
+    "2": 0.00823045267489712,
+    "3": 0.00823045267489712,
+    "4": 0.00823045267489712
+  },
+  "fixed_interval_by_fold": {
+    "0": {
+      "FD001": 127.0,
+      "FD002": 127.0,
+      "FD003": 146.0,
+      "FD004": 127.0
+    },
+    "1": {
+      "FD001": 127.0,
+      "FD002": 127.0,
+      "FD003": 144.0,
+      "FD004": 142.0
+    },
+    "2": {
+      "FD001": 146.0,
+      "FD002": 127.0,
+      "FD003": 144.0,
+      "FD004": 127.0
+    },
+    "3": {
+      "FD001": 127.0,
+      "FD002": 127.0,
+      "FD003": 144.0,
+      "FD004": 127.0
+    },
+    "4": {
+      "FD001": 127.0,
+      "FD002": 132.0,
+      "FD003": 144.0,
+      "FD004": 144.0
+    }
+  },
+  "rule": "book a shop visit when p_fail_within_n >= threshold",
+  "expected_cost_per_engine_cross_fitted": 231.2792665726375,
+  "note": "costs are ASSUMPTIONS (configs/config.yaml, business); NASA C-MAPSS is a simulation"
+}

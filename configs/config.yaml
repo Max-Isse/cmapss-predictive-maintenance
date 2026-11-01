@@ -111,6 +111,19 @@ models:
     champion_alias: champion
     primary_metric: cv_rmse_capped  # lower is better; the alias moves only when a new version improves it
 
+policy:
+  # Decision layer (phase 6, D-024): alert when P(fail within N) >= threshold; an alert at cycle t books a shop
+  # visit after cycle t + lead time. Costs: `business`. Thresholds and intervals are chosen by expected cost on
+  # the training engines' out-of-fold predictions, cross-fitted by fold.
+  fixed_interval_candidates: [50, 400]      # removal cycles searched for the fixed-interval baseline (per dataset)
+  threshold_grid_points: 400
+  horizons: [15, 30, 45, 60]                # label horizons N trained for the sensitivity analysis
+  lead_time_scenarios: [15, 30, 45]         # lead time L, each with N = L
+  cost_scenarios:                           # one assumption varied at a time around `business`
+    unplanned_failure_cost: [250, 500, 2000, 5000]
+    planned_maintenance_cost: [100, 400]
+    lost_life_cost_per_cycle: [0.5, 2.0]
+
 spark:
   master: local[4]
   shuffle_partitions: 8

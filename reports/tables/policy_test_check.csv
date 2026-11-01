@@ -1,0 +1,4 @@
+status,engines,mean_rul_at_decision,mean_lost
+decided: in time,246,66.04471544715447,36.04471544715447
+decided: too late,3,29.666666666666668,
+not decided: censored,458,,

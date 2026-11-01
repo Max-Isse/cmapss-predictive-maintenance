@@ -249,3 +249,41 @@ failure probability and the alert. Alias `champion` moves to a new version only 
 never a test metric) improves.
 **Why:** serving loads `models:/cmapss-maintenance@champion` and gets every output from one versioned artifact,
 traceable to the exact data version. Phase 7 reuses the same promotion rule for challenger runs.
+
+## D-024 Policy evaluation: simulate full engine lives with out-of-fold probabilities, cross-fitted choices
+**Choice:** the decision rule is "book a shop visit at the first cycle where the calibrated P(fail within N) reaches
+the threshold"; the visit happens after the lead time L. It is in time if the engine still had more than L cycles
+left at the decision, and the cycles it could still have flown (RUL − L) count as lost life; otherwise the engine
+fails in service and costs `unplanned_failure_cost` (no planned visit is charged in that case). Policies:
+model rule; fixed interval (remove at cycle T, chosen per dataset, a deliberately strong baseline); run to failure;
+perfect information (decide at RUL = L + 1, the lower bound).
+**Data:** the 709 training engines, because they run to failure and every policy's outcome is known. Their signal
+is the out-of-fold probability of a classifier with the champion's settings, calibrated by an isotonic fit on the
+other folds. The threshold and the fixed intervals are chosen on four folds and applied to the fifth, so the
+reported costs are not scored on the engines that chose them. The official test engines stop before failure; they
+give a partial check (decisions inside the observed window, certain failures, censored engines).
+**Why:** a threshold chosen by expected cost uses the asymmetry of the costs directly, unlike the fixed-precision
+alert of phase 5, whose precision did not transfer to the test fleet (D-021).
+**Caveats:** costs are assumptions (no cost data come with C-MAPSS); one engine is one life, with no repair,
+partial maintenance or shop capacity limits; the simulated fleet's failure physics is cleaner than a real fleet's.
+
+## D-025 Served threshold and its storage; sensitivity scenarios
+**Choice:** the served threshold is chosen on all training engines with the champion's own calibrator and stored
+in `artifacts/policy.json` (copy in `reports/tables/policy.json`) and as tag `policy_threshold` on the champion
+model version; the API (phase 7) reads it. Sensitivity re-chooses thresholds and intervals (cross-fitted) for each
+scenario: one cost assumption at a time, the label horizon N with L fixed (classifier retrained for each N), and
+the lead time L with N = L.
+**Why:** a threshold is only meaningful together with the model version and costs it was chosen for, so it lives
+next to both; the scenarios show which conclusions survive other cost assumptions.
+**Results (2026-11-01, `reports/maintenance_policy.md`):** served threshold 0.0094 on the calibrated P(fail within
+30); cross-fitted cost per engine 231 for the model rule, 306 for the best fixed interval, 1,000 for run to failure
+and 201 for perfect information: a saving of about 75 per engine (24%) against fixed intervals, 71% of what perfect
+information would save. Estimates under the assumed costs, on simulated engines.
+**Finding on N:** with N equal to the lead time, the rule must fire while the engine is still outside the positive
+class, so the chosen threshold sits on the lowest steps of the calibrated probability (0.008–0.012 across folds)
+and the cost curve is flat from 0.001 to 0.03: the classifier's resolution in that region is coarse. N = 45 with
+L = 30 moves the decision to p ≈ 0.5 and lowers the cross-fitted cost to 223 (−3.7%); N = 15 < L is worse than
+fixed intervals (395), because a 15-cycle horizon carries no signal when a 30-cycle lead time requires deciding.
+**Recommendation (not yet applied):** train the served classifier with a horizon N > L (for example L + 15) and
+re-choose the threshold; the gold label `fail_within_n` stays tied to the configured lead time for evaluation.
+
